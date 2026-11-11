@@ -1,0 +1,6 @@
+.venv/
+results/
+data/
+__pycache__/
+.ruff_cache/
+*.log

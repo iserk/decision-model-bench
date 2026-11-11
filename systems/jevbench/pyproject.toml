@@ -1,0 +1,13 @@
+[project]
+name = "bench-env-jevbench"
+version = "0.1.0"
+description = "JevBench's official harness, used by jevbench_eval.py"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Tag v1.4.2.2, the harness behind the v1.4.2 board. The core and its HTTP adapters use only
+    # the standard library.
+    "jevbench @ git+https://github.com/fstandhartinger/jevbench@fcc69279a933f882ccc4489eb14bf467647dbdb7",
+]
+
+[tool.uv]
+package = false

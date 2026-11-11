@@ -1,0 +1,12 @@
+[project]
+name = "bench-env-decider"
+version = "0.1.0"
+description = "Serving environment for Mapika/decider-2b (decider-ai)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # serve: the FastAPI server; metal: the optional MLX kernel used on MPS.
+    "decider-ai[serve,metal]==1.10.0",
+]
+
+[tool.uv]
+package = false

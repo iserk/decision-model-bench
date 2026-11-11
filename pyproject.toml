@@ -1,0 +1,13 @@
+[project]
+name = "strands-decider-bench"
+version = "0.1.0"
+description = "Small latency/throughput/accuracy benchmark for strands-decider"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Gemma 4 support and the mlx extra are on main, not yet on PyPI.
+    "strands-decider[mlx] @ git+https://github.com/strands-labs/strands-decider",
+    "httpx>=0.27",
+]
+
+[tool.uv]
+package = false

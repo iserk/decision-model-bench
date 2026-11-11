@@ -1,0 +1,12 @@
+[project]
+name = "bench-env-open-jev"
+version = "0.1.0"
+description = "Serving environment for ZefanCai/Open-Jev-2B (Open-Jev)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Not on PyPI. The `train` extra carries the inference pins (transformers 5.10.2, peft 0.19.1).
+    "open-jev[train] @ git+https://github.com/Zefan-Cai/Open-Jev@bd4118882f733574a3250a4b65fe4d884130c08b",
+]
+
+[tool.uv]
+package = false
