@@ -14,9 +14,11 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
 import signal
 import statistics
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -30,7 +32,11 @@ STRANDS_MODEL = "StrandsAgents/strands-decider-2B-qwen3.5-v1-2610"
 # Pinned Hub commits of the competitor checkpoints.
 DECIDER_MODEL, DECIDER_REVISION = "Mapika/decider-2b", "7614a6c7ea5a047aa7d7bcfb1a0015469381c3e3"
 OPENJEV_MODEL, OPENJEV_REVISION = "ZefanCai/Open-Jev-2B", "0c7aa498b1627be8da4acf34c863ff0ee0a92785"
-LOCAL_TARGETS = ["strands:mps", "strands:mlx", "decider:mps", "openjev:mps"]
+if sys.platform == "darwin":
+    LOCAL_TARGETS = ["strands:mps", "strands:mlx", "decider:mps", "openjev:mps"]
+else:  # CUDA when an NVIDIA driver is present, else CPU (slow; for checking the setup)
+    _DEVICE = "cuda" if shutil.which("nvidia-smi") else "cpu"
+    LOCAL_TARGETS = [f"{s}:{_DEVICE}" for s in ("strands", "decider", "openjev")]
 # Jev runs only as TypeSafe's hosted API: latency includes the network round trip.
 JEV_URL, JEV_MODEL, JEV_KEY_ENV = "https://api.typesafe.ai", "jev-latest", "TYPESAFE_API_KEY"
 DEFAULT_TARGETS = LOCAL_TARGETS + (["jev:api"] if os.environ.get(JEV_KEY_ENV) else [])

@@ -1,10 +1,11 @@
 [project]
-name = "strands-decider-bench"
+name = "decision-model-bench"
 version = "0.1.0"
-description = "Small latency/throughput/accuracy benchmark for strands-decider"
+description = "Speed and JevBench accuracy of small typed decision models"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    # Gemma 4 support and the mlx extra are on main, not yet on PyPI.
+    # Gemma 4 support and the mlx extra are on main, not yet on PyPI. The extra installs MLX
+    # only on Apple-silicon macOS.
     "strands-decider[mlx] @ git+https://github.com/strands-labs/strands-decider",
     "httpx>=0.27",
 ]

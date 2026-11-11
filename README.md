@@ -1,6 +1,6 @@
 # Decision-model benchmark
 
-Benchmarks for small typed decision models on Apple silicon:
+Benchmarks for small typed decision models, on Apple silicon (MLX, MPS) or Linux (CUDA, CPU):
 [strands-decider](https://github.com/strands-labs/strands-decider), Mapika's decider-2b,
 Open-Jev-2B, and TypeSafe's hosted Jev for reference. Each one answers yes/no (`noul`),
 `choice` and `score` questions over `POST /v1/systemone`. There are two benchmarks:
@@ -47,21 +47,31 @@ commit, and checks their SHA-256 hashes.
 
 A target is `SYSTEM:DEVICE`.
 
-| system | model | environment | Mac devices |
+| system | model | environment | devices |
 |---|---|---|---|
-| `strands` | `StrandsAgents/strands-decider-2B-qwen3.5-v1-2610` | `.venv` | `mps`, `mlx` |
-| `decider` | `Mapika/decider-2b` @ `7614a6c` (decider-ai 1.10.0) | `systems/decider/.venv` | `mps` |
-| `openjev` | `ZefanCai/Open-Jev-2B` @ `0c7aa49` | `systems/open-jev/.venv` | `mps` |
+| `strands` | `StrandsAgents/strands-decider-2B-qwen3.5-v1-2610` | `.venv` | `mlx`, `mps`, `cuda`, `cpu` |
+| `decider` | `Mapika/decider-2b` @ `7614a6c` (decider-ai 1.10.0) | `systems/decider/.venv` | `mps`, `cuda`, `cpu` |
+| `openjev` | `ZefanCai/Open-Jev-2B` @ `0c7aa49` | `systems/open-jev/.venv` | `mps`, `cuda`, `cpu` |
 | `jev` | TypeSafe Jev, `jev-latest`, hosted at `api.typesafe.ai` | none | `api` |
+
+The default targets depend on the platform:
+
+- **macOS:** `strands:mps strands:mlx decider:mps openjev:mps`.
+- **Linux:** each local system on `cuda` when `nvidia-smi` is found, otherwise on `cpu`. CPU
+  is too slow for meaningful speed numbers, but it is enough to check that everything is set up.
+
+The same lock files install on both platforms: MLX and decider-ai's Metal kernel install only
+on Apple-silicon macOS. On Linux, PyPI's torch wheels bring their own CUDA runtime, so you
+need only an NVIDIA driver.
 
 The configurations differ, so state them alongside any result:
 
 - **decider-2b** runs with images off (`DECIDER_IMAGES=0`), so it serves text only, like the
   others. Its checkpoint enables images by default, and loading the vision tower needs
   torchvision.
-- **Open-Jev-2B** uses the Apple-silicon settings from its `docs/deployment.md`: float32, batch
-  size 1, no prefix cache, and a 4,096-token context. That is its documented Mac setup, not
-  necessarily its fastest. A hard task the server rejects as too long counts as wrong.
+- **Open-Jev-2B** uses the reference settings from its `docs/deployment.md`: batch size 1, no
+  prefix cache and a 4,096-token context, plus float32 on MPS, as its docs require there. That is
+  its documented setup, not necessarily its fastest. A hard task the server rejects as too long counts as wrong.
 - **Jev** is a hosted API. Its latency includes the network round trip from wherever you run
   this. `bench.py` measures that round trip separately: it times a request the API rejects at
   its edge, and reports that time next to Jev's latency. `jev_latency.py` breaks it down into DNS,
@@ -88,7 +98,7 @@ TYPESAFE_API_KEY=... uv run jev_latency.py    # where Jev's response time goes
 with the harness's per-task records, raw responses and summary for each target. Every
 `results.json` records:
 
-- the machine (chip, model, memory, macOS);
+- the machine (OS, CPU or chip, memory, NVIDIA GPUs and driver);
 - every package version in each environment used, with git commits;
 - the Hugging Face commit of every model;
 - the arguments.
@@ -97,12 +107,12 @@ The home directory is replaced with `~` in results and server logs.
 
 ### Reproducing published numbers
 
-1. Rerun on the same chip, with all targets in one run, so they share the machine's state.
+1. Rerun on the same hardware, with all targets in one run, so they share the machine's state.
 2. Repeat `bench.py` three times, and report the spread between runs, not a single run.
 3. `jevbench_eval.py` is deterministic for local models; a second run is a consistency check.
 4. Compare `environment` and `models` in your `results.json` with the published one before
    comparing numbers.
-5. Speed varies with chip and memory bandwidth, so compare speeds only on the same chip.
+5. Speed varies with chip and memory bandwidth, so compare speeds only on the same hardware.
 6. JevBench's leaderboard composite also includes sealed tasks and its maintainers' own
    speed and cost measurements. This is not that composite: the accuracy here is on the public
    tasks only. It is directly comparable to the board's public-task accuracy.

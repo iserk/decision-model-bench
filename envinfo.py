@@ -6,8 +6,10 @@ Stored in every results file, so a published number can be traced to its softwar
 from __future__ import annotations
 
 import json
+import os
 import platform
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent
@@ -35,21 +37,50 @@ print(json.dumps(dict(sorted(out.items()))))
 """
 
 
-def _sysctl(name: str) -> str | None:
+def _run(*cmd: str) -> str | None:
     try:
-        return subprocess.run(["sysctl", "-n", name], capture_output=True, text=True,
-                              check=True).stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
+        return subprocess.run(cmd, capture_output=True, text=True, check=True,
+                              timeout=30).stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
         return None
 
 
+def _linux() -> dict:
+    def field(path: str, key: str, sep: str = ":") -> str | None:
+        try:
+            for line in Path(path).read_text().splitlines():
+                if line.startswith(key):
+                    return line.split(sep, 1)[1].strip().strip('"')
+        except OSError:
+            pass
+        return None
+
+    mem_kb = field("/proc/meminfo", "MemTotal")
+    # ARM kernels leave "model name" out of /proc/cpuinfo; lscpu decodes the part number.
+    chip = field("/proc/cpuinfo", "model name") or next(
+        (line.split(":", 1)[1].strip() for line in (_run("lscpu") or "").splitlines()
+         if line.strip().startswith("Model name")), None)
+    return {"os": field("/etc/os-release", "PRETTY_NAME", "=") or platform.platform(),
+            "chip": chip, "model": None,
+            "memory_gb": round(int(mem_kb.split()[0]) / 2**20) if mem_kb else None,
+            "cpu_cores": os.cpu_count()}
+
+
 def machine() -> dict:
-    mem = _sysctl("hw.memsize")
-    return {"os": f"macOS {platform.mac_ver()[0]}" if platform.mac_ver()[0] else platform.platform(),
-            "kernel": platform.release(), "arch": platform.machine(),
-            "chip": _sysctl("machdep.cpu.brand_string"), "model": _sysctl("hw.model"),
-            "memory_gb": round(int(mem) / 2**30) if mem else None,
-            "cpu_cores": _sysctl("hw.ncpu"), "python": platform.python_version()}
+    if sys.platform == "darwin":
+        mem = _run("sysctl", "-n", "hw.memsize")
+        info = {"os": f"macOS {platform.mac_ver()[0]}",
+                "chip": _run("sysctl", "-n", "machdep.cpu.brand_string"),
+                "model": _run("sysctl", "-n", "hw.model"),
+                "memory_gb": round(int(mem) / 2**30) if mem else None,
+                "cpu_cores": _run("sysctl", "-n", "hw.ncpu")}
+    else:
+        info = _linux()
+    # One line per NVIDIA GPU: name, memory, driver.
+    gpus = _run("nvidia-smi", "--query-gpu=name,memory.total,driver_version",
+                "--format=csv,noheader")
+    return {**info, "gpus": gpus.splitlines() if gpus else None, "kernel": platform.release(),
+            "arch": platform.machine(), "python": platform.python_version()}
 
 
 def packages(env: str) -> dict | str:
