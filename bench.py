@@ -39,7 +39,10 @@ else:  # CUDA when an NVIDIA driver is present, else CPU (slow; for checking the
     LOCAL_TARGETS = [f"{s}:{_DEVICE}" for s in ("strands", "decider", "openjev")]
 # Jev runs only as TypeSafe's hosted API: latency includes the network round trip.
 JEV_URL, JEV_MODEL, JEV_KEY_ENV = "https://api.typesafe.ai", "jev-latest", "TYPESAFE_API_KEY"
-DEFAULT_TARGETS = LOCAL_TARGETS + (["jev:api"] if os.environ.get(JEV_KEY_ENV) else [])
+# Gemini Decision 1 runs as Google's hosted API, behind gemini_proxy.py on localhost.
+GEMINI_URL, GEMINI_KEY_ENV = "https://generativelanguage.googleapis.com", "GEMINI_API_KEY"
+DEFAULT_TARGETS = (LOCAL_TARGETS + (["jev:api"] if os.environ.get(JEV_KEY_ENV) else [])
+                   + (["gemini:api"] if os.environ.get(GEMINI_KEY_ENV) else []))
 
 
 def venv_bin(env: str, name: str) -> str:
@@ -119,6 +122,18 @@ SYSTEMS = {
     "jev": {
         "label": f"TypeSafe Jev ({JEV_MODEL}, hosted)",
         "remote": True,
+    },
+    "gemini": {
+        "label": "Google Gemini Decision 1 (hosted, via gemini_proxy.py)",
+        # A local translator in front of a hosted API: started like a server, but measured with
+        # the hosted settings (--remote-concurrency, network round trip) and billed by Google.
+        "hosted": {"url": GEMINI_URL, "edge_path": "/v1beta/decisions", "key_env": GEMINI_KEY_ENV,
+                   "harness_cost": ["--price-in-per-m", "0.10", "--price-out-per-m", "0",
+                                    "--cost-basis", "gemini_decisions_paid_tier_list_price"]},
+        "prefetch": lambda _model: {"revisions": {}},
+        "cmd": lambda p, device, port: [sys.executable, str(ROOT / "gemini_proxy.py"),
+                                        "--port", str(port)],
+        "env": lambda p, device: {},
     },
 }
 
@@ -323,6 +338,10 @@ def print_report(results: dict) -> None:
             e = r["edge_round_trip_ms"]["p50"]
             print(f"  of which network + edge (a request the API rejects at once): p50 {e:.0f} ms;"
                   f" past the edge ~{c['p50'] - e:.0f} ms")
+        if r.get("upstream") and a["server_latency_ms"]:
+            s = a["server_latency_ms"]["p50"]
+            print(f"  of which waiting for the hosted API: p50 {s:.0f} ms;"
+                  f" the local translator ~{c['p50'] - s:.0f} ms")
         print("questions per request on a long state:")
         for k, m in r["multi_question"].items():
             print(f"  {k:>2} questions  p50 {m['p50']:7.0f} ms   {m['input_tokens'] or '-':>5} input tokens")
@@ -344,15 +363,15 @@ def print_report(results: dict) -> None:
                   f"{r['multi_question']['8']['p50']:>8.0f}{best:>7.1f}")
 
 
-def edge_round_trip(url: str, n: int = 20) -> dict:
+def edge_round_trip(url: str, path: str = "/v1/systemone", n: int = 20) -> dict:
     """Time of an unauthenticated GET, which the API rejects at its edge: the network round trip
     plus edge time, the floor under every real request. jev_latency.py breaks it down further."""
     lat = []
     with httpx.Client(base_url=url, timeout=30) as client:
-        client.get("/v1/systemone")  # open the connection
+        client.get(path)  # open the connection
         for _ in range(n):
             t0 = time.perf_counter()
-            client.get("/v1/systemone")
+            client.get(path)
             lat.append((time.perf_counter() - t0) * 1000)
     return summary(lat)
 
@@ -422,6 +441,11 @@ def main() -> None:
             if spec.get("remote"):
                 results["runs"][name] = run_remote(name, spec, args)
                 continue
+            hosted = spec.get("hosted")
+            if hosted and not os.environ.get(hosted["key_env"]):
+                print(f"[{name}] skipped: set {hosted['key_env']}", flush=True)
+                results["runs"][name] = {"label": spec["label"], "error": f"{hosted['key_env']} is not set"}
+                continue
             server = Server(name, spec["cmd"](fetched[system], device, args.port),
                             spec["env"](fetched[system], device), args.port, out_dir)
             try:
@@ -429,8 +453,14 @@ def main() -> None:
                 health = server.wait_ready(args.startup_timeout)
                 startup = time.monotonic() - t0
                 print(f"[{name}] ready in {startup:.0f}s", flush=True)
+                run = run_one(server.url, args,
+                              concurrency=(args.remote_concurrency or args.concurrency) if hosted else None)
+                if hosted:
+                    print("  network round trip ...", flush=True)
+                    run["upstream"] = hosted["url"]
+                    run["edge_round_trip_ms"] = edge_round_trip(hosted["url"], hosted["edge_path"])
                 results["runs"][name] = {"label": spec["label"], "health": health,
-                                         "startup_s": startup, **run_one(server.url, args)}
+                                         "startup_s": startup, **run}
             except Exception as exc:  # keep going with the other targets
                 print(f"[{name}] failed: {exc}", flush=True)
                 results["runs"][name] = {"label": spec["label"], "error": str(exc)}

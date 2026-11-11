@@ -2,8 +2,8 @@
 
 Benchmarks for small typed decision models, on Apple silicon (MLX, MPS) or Linux (CUDA, CPU):
 [strands-decider](https://github.com/strands-labs/strands-decider), Mapika's decider-2b,
-Open-Jev-2B, and TypeSafe's hosted Jev for reference. Each one answers yes/no (`noul`),
-`choice` and `score` questions over `POST /v1/systemone`.
+Open-Jev-2B, and two hosted models for reference: TypeSafe's Jev and Google's Gemini Decision 1.
+Each one answers yes/no (`noul`), `choice` and `score` questions over `POST /v1/systemone`.
 
 ## Structure
 
@@ -77,6 +77,7 @@ A target is `SYSTEM:DEVICE`.
 | `decider` | `Mapika/decider-2b` @ `7614a6c` (decider-ai 1.10.0) | `systems/decider/.venv` | `mps`, `cuda`, `cpu` |
 | `openjev` | `ZefanCai/Open-Jev-2B` @ `0c7aa49` | `systems/open-jev/.venv` | `mps`, `cuda`, `cpu` |
 | `jev` | TypeSafe Jev, `jev-latest`, hosted at `api.typesafe.ai` | none | `api` |
+| `gemini` | Google Gemini Decision 1, `gemini-decision-1`, hosted, through `gemini_proxy.py` | `.venv` | `api` |
 
 The default targets depend on the platform:
 
@@ -102,6 +103,19 @@ The configurations differ, so state them alongside any result:
   TCP, TLS and edge time. Jev needs `TYPESAFE_API_KEY` in the environment. It is included in the
   default targets only when that variable is set. The key is read from the environment only, and
   is never printed or written to results.
+- **Gemini Decision 1** is Google's hosted Decisions API, which has its own request format.
+  `gemini_proxy.py` translates: it serves `POST /v1/systemone` on localhost and forwards each
+  request to Google. The format follows the Vercel AI SDK's Google provider, the API's first
+  public client. Three things differ from Jev:
+  - a JSON state is sent as JSON text, as that client does;
+  - every question needs instructions, and choice and score questions need 2 to 255 options;
+  - a request Google refuses counts as wrong.
+
+  Its latency includes the network round trip, measured the same way as Jev's, plus the
+  translator's own time. `bench.py` reports that time separately; it is under 1 ms. It is in
+  the default targets only when `GEMINI_API_KEY` is set. Use a paid-tier key: Google may
+  use free-tier requests to improve its products, and the free tier's rate limits are low.
+  JevBench prices its runs at the paid tier's $0.10 per million input tokens.
 
 ## Run
 
@@ -116,6 +130,9 @@ uv run jevbench_eval.py --targets strands:mlx --limit 20     # a smoke test
 uv run jevbench_eval.py --report results/jevbench-A results/jevbench-B   # merge saved runs
 
 TYPESAFE_API_KEY=... uv run jev_latency.py    # where Jev's response time goes
+
+GEMINI_API_KEY=... uv run bench.py --targets gemini:api --remote-concurrency 1 4
+GEMINI_API_KEY=... uv run jevbench_eval.py --targets gemini:api
 ```
 
 `bench.py` writes `results/<timestamp>/`. `jevbench_eval.py` writes `results/jevbench-<timestamp>/`,
@@ -143,15 +160,19 @@ The home directory is replaced with `~` in results and server logs.
 
 ## Example results
 
-Measured on 11 November 2026 on a Mac mini: Apple M5 Pro, 24 GB, macOS 27.2. Software:
+Measured on 11–12 November 2026 on a Mac mini: Apple M5 Pro, 24 GB, macOS 27.2. Software:
 torch 2.15.0 and mlx 0.32.4, strands-decider at `846b69e`, decider-ai 1.10.0, and Open-Jev
 at `bd41188`. Jev was called from the same machine, over a network round trip of about
-140 ms. These are examples from one machine: rerun them on yours before quoting them.
+140 ms during the JevBench run and 155 ms during the speed runs. Gemini Decision 1
+(`gemini-decision-1`, a day after its release) was called from the same machine on 12 November,
+over a round trip of about 117 ms. These are examples from one machine: rerun them on yours
+before quoting them.
 
 ### Accuracy: JevBench public set (231 tasks)
 
 | system | correct | accuracy (95% CI) | easy | standard | hard | Brier | ECE | p50 / p95 ms |
 |---|---|---|---|---|---|---|---|---|
+| Gemini Decision 1 (hosted) | 213 | 92.2% (88.0–95.0) | 100% | 100% | 83.8% | 0.118 | 0.035 | 248 / 378 |
 | Jev (hosted, `jev-1.14.0`) | 205 | 88.7% (84.0–92.2) | 100% | 98.6% | 77.5% | 0.145 | 0.069 | 217 / 251 |
 | strands-decider-2B, MLX | 181 | 78.4% (72.6–83.2) | 100% | 93.1% | 59.5% | 0.280 | 0.062 | 34 / 398 |
 | strands-decider-2B, MPS | 180 | 77.9% (72.1–82.8) | 100% | 93.1% | 58.6% | 0.280 | 0.074 | 104 / 1,073 |
@@ -163,26 +184,50 @@ Brier and ECE: lower is better. Latency is per task, one request at a time, on s
 
 Paired on the same tasks, the systems fall into three groups:
 
-- Jev is first.
+- The two hosted models are first. Gemini Decision 1 gets 12 tasks right that Jev gets wrong,
+  and Jev 4 that Gemini gets wrong. That leans towards Gemini, but is not significant
+  (McNemar p = 0.077).
 - strands-decider and decider-2b are tied: each gets 25 tasks right that the other gets wrong
   (McNemar p = 1.0).
 - Open-Jev is third.
 
-Every difference between groups is significant (p < 0.001). Open-Jev's 65.4% agrees with its
-leaderboard entry (0.645).
+Every difference between groups is significant (p < 0.001). Two results agree with published
+numbers: Open-Jev's 65.4% with its leaderboard entry (0.645), and Gemini's 92.2% with the
+public-split score in Google's launch announcement.
 
-### Speed: `bench.py` (one run)
+Cost of the 231 tasks, from the tokens each API reported:
 
-| system | p50 ms, 1 question | p50 ms, 8 questions on a ~440-token state | req/s at concurrency 1 / 4 / 8 |
-|---|---|---|---|
-| strands-decider-2B, MLX | 26 | 152 | 37.2 / 39.4 / 39.6 |
-| strands-decider-2B, MPS | 70 | 420 | 14.1 / 14.0 / 14.2 |
-| decider-2b, MPS | 46 | 1,990 | 18.6 / 26.6 / 30.7 |
-| Open-Jev-2B, MPS | 248 | 5,505 | 5.2 / 5.2 / 5.2 |
-| Jev (hosted) | 182 | 178 | 5.0 / 20.6 / not run |
+- **Gemini:** 158,532 input tokens at $0.10 per million, $0.016.
+- **Jev:** 211,309 input tokens at $0.042 per million, $0.009. That price is from OpenRouter's
+  listing, not TypeSafe's own price list.
 
-Jev was run at concurrency 1 and 4 only, since TypeSafe publishes no rate limits. Its latency
-barely changes with the number of questions: about 140 ms of each request is network time.
+Output is free on both. The two count tokens differently, so compare the costs, not the counts.
+
+### Speed: `bench.py` (three runs)
+
+Three consecutive runs on 12 November 2026, with the mini's other services paused. Each cell is
+the median of the three runs, with the lowest and highest in brackets where they differ.
+
+| system | p50 ms, 1 question | p50 ms, 8 questions on a ~440-token state | req/s, concurrency 1 | req/s, concurrency 4 | req/s, concurrency 8 |
+|---|---|---|---|---|---|
+| strands-decider-2B, MLX | 27 | 153 (153–154) | 36.6 (36.0–37.0) | 38.4 (38.2–38.8) | 38.7 (38.6–38.8) |
+| strands-decider-2B, MPS | 72 (71–72) | 423 (421–424) | 13.9 (13.9–14.0) | 14.0 (14.0–14.1) | 14.0 (13.9–14.0) |
+| decider-2b, MPS | 46 (46–47) | 2,019 (2,019–2,028) | 18.5 (18.4–18.6) | 27.2 (26.1–29.9) | 31.2 (31.1–31.2) |
+| Open-Jev-2B, MPS | 253 (252–254) | 5,525 (5,523–5,533) | 5.2 (5.1–5.2) | 5.2 | 5.2 |
+| Jev (hosted) | 193 (190–194) | 207 (199–210) | 5.1 (5.0–5.2) | 19.5 (19.5–19.7) | not run |
+| Gemini Decision 1 (hosted) | 233 (230–240) | 249 (248–253) | 4.0 (3.9–4.1) | 15.3 (14.8–15.8) | not run |
+
+The runs agree to within a few percent, except decider-2b at concurrency 4, which varies by
+about 15%. The hosted models were run at concurrency 1 and 4 only, to stay well inside their
+rate limits. Their latency barely changes with the number of questions, and much of it is
+network time:
+
+- **Jev:** about 155 ms of 193 ms is the round trip to TypeSafe, leaving roughly 40 ms past its edge.
+- **Gemini:** about 117 ms of 233 ms is the round trip to Google, leaving roughly 115 ms past
+  its edge. The local translator adds 1–2 ms.
+
+Gemini's speed runs were made later the same night, without pausing the mini's other services.
+Those barely affect a hosted model, whose time is spent on the network and on Google's servers.
 
 ## Files
 
@@ -192,6 +237,7 @@ barely changes with the number of questions: about 140 ms of each request is net
 - `envinfo.py`: records the machine and package versions, and replaces the home directory with
   `~` in results.
 - `jev_latency.py`: the network breakdown for the hosted Jev API.
+- `gemini_proxy.py`: serves Google's Gemini Decisions API as `POST /v1/systemone`.
 - `workload.py`: the 26 cases and the multi-question workload for `bench.py`.
 - `systems/*/`: each competitor's serving environment, and JevBench's harness.
 

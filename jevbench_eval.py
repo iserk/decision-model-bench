@@ -101,7 +101,8 @@ def harness(*args: str, log: Path | None = None) -> int:
 
 
 def evaluate(name: str, url: str, model: str, tasks: Path, tiers: dict, out: Path,
-             key_env: str = "", delay_s: float = 0.0, warmup: int = 5) -> dict:
+             key_env: str = "", delay_s: float = 0.0, warmup: int = 5,
+             cost: list[str] | None = None) -> dict:
     """Warm the server up, run the harness over every task, and summarize."""
     headers = {"Authorization": f"Bearer {os.environ[key_env]}"} if key_env else {}
     with httpx.Client(base_url=url, timeout=300, headers=headers) as client:
@@ -114,7 +115,9 @@ def evaluate(name: str, url: str, model: str, tasks: Path, tiers: dict, out: Pat
            "--results", str(d / "results.jsonl"), "--raw-dir", str(d / "raw"),
            "--ledger", str(d / "ledger.jsonl"), "--manifest", str(d / "manifest.json"),
            "--delay-s", str(delay_s)]
-    if not key_env:  # local weights: no bill; the harness's cost model doesn't apply
+    if cost:  # a hosted API behind a local translator: billed per token
+        run += cost
+    elif not key_env:  # local weights: no bill; the harness's cost model doesn't apply
         run += ["--reserve-usd", "0", "--cost-basis", "local_weights_compute_excluded"]
     print(f"[{name}] JevBench: {len(tiers)} tasks, serial", flush=True)
     code = harness(*run, log=d / "harness.log")
@@ -259,6 +262,11 @@ def main() -> None:
                     print(f"[{name}] failed: {msg}", flush=True)
                     results["runs"][name] = {"label": spec["label"], "error": msg}
                 continue
+            hosted = spec.get("hosted")
+            if hosted and not os.environ.get(hosted["key_env"]):
+                print(f"[{name}] skipped: set {hosted['key_env']}", flush=True)
+                results["runs"][name] = {"label": spec["label"], "error": f"{hosted['key_env']} is not set"}
+                continue
             server = Server(name, spec["cmd"](fetched[system], device, args.port),
                             spec["env"](fetched[system], device), args.port, out)
             try:
@@ -266,7 +274,9 @@ def main() -> None:
                 print(f"[{name}] ready", flush=True)
                 results["runs"][name] = {"label": spec["label"], "health": health,
                                          **evaluate(name, server.url, spec.get("api_model", system), tasks,
-                                                    tiers, out)}
+                                                    tiers, out,
+                                                    delay_s=args.remote_delay if hosted else 0.0,
+                                                    cost=hosted["harness_cost"] if hosted else None)}
             except Exception as exc:  # keep going with the other targets
                 print(f"[{name}] failed: {exc}", flush=True)
                 results["runs"][name] = {"label": spec["label"], "error": str(exc)}
