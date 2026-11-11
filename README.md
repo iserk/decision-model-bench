@@ -3,26 +3,50 @@
 Benchmarks for small typed decision models, on Apple silicon (MLX, MPS) or Linux (CUDA, CPU):
 [strands-decider](https://github.com/strands-labs/strands-decider), Mapika's decider-2b,
 Open-Jev-2B, and TypeSafe's hosted Jev for reference. Each one answers yes/no (`noul`),
-`choice` and `score` questions over `POST /v1/systemone`. There are two benchmarks:
+`choice` and `score` questions over `POST /v1/systemone`.
 
-- **`bench.py`: speed.** It starts each server and measures:
-  1. **Sequential latency** on 26 hand-written cases (10 noul, 10 choice, 6 score), one question
-     per request, each case sent `--repeats` times. Their accuracy and Brier score are a smoke test
-     only, too few cases to rank systems by.
-  2. **Multi-question cost**: one long state (~440 tokens) with 1, 2, 4 and 8 questions per
-     request. This shows prefix caching: a server that caches reads the state once, and each
-     extra question adds only its own tokens.
-  3. **Throughput**: `--requests` requests at each `--concurrency` level, giving req/s and p50/p95
-     latency.
-- **`jevbench_eval.py`: accuracy and calibration** on the 231 public tasks of
-  [JevBench](https://github.com/fstandhartinger/jevbench), an independent, MIT-licensed benchmark
-  for this class of model. The tasks are scored by JevBench's own harness (tag v1.4.2.2, the
-  version behind the v1.4.2 [leaderboard](https://benchmarkheaven.com/jev-models)). It reports:
-  - accuracy with a 95% Wilson interval, and accuracy per tier (easy 48, standard 72, hard 111);
-  - Brier score and expected calibration error (ECE);
-  - per-task latency, one request at a time;
-  - for each two systems, the tasks only one of them got right, with an exact McNemar p-value.
-    The p-value tells you whether a gap between two systems is more than noise.
+## Structure
+
+The benchmark has two independent parts, each with its own script. Either can be run on its own.
+
+| part | script | task set | measures |
+|---|---|---|---|
+| 1. Speed | `bench.py` | our own: 26 hand-written cases and a multi-question workload | latency, prefix caching, throughput |
+| 2. Accuracy and calibration | `jevbench_eval.py` | [JevBench](https://github.com/fstandhartinger/jevbench)'s 231 public tasks | accuracy, Brier, ECE, paired tests |
+
+### 1. Speed: `bench.py`
+
+It starts each server and measures:
+
+1. **Sequential latency** on 26 hand-written cases (10 noul, 10 choice, 6 score), one question
+   per request, each case sent `--repeats` times. Their accuracy and Brier score are a smoke test
+   only, too few cases to rank systems by.
+2. **Multi-question cost**: one long state (~440 tokens) with 1, 2, 4 and 8 questions per
+   request. This shows prefix caching: a server that caches reads the state once, and each
+   extra question adds only its own tokens.
+3. **Throughput**: `--requests` requests at each `--concurrency` level, giving req/s and p50/p95
+   latency.
+
+### 2. Accuracy and calibration: `jevbench_eval.py`
+
+It runs the 231 public tasks of [JevBench](https://github.com/fstandhartinger/jevbench), an
+independent, MIT-licensed benchmark for this class of model. The tasks are scored by JevBench's
+own harness (tag v1.4.2.2, the version behind the v1.4.2
+[leaderboard](https://benchmarkheaven.com/jev-models)). It reports:
+
+- accuracy with a 95% Wilson interval, and accuracy per tier (easy 48, standard 72, hard 111);
+- Brier score and expected calibration error (ECE);
+- per-task latency, one request at a time;
+- for each two systems, the tasks only one of them got right, with an exact McNemar p-value.
+  The p-value tells you whether a gap between two systems is more than noise.
+
+JevBench is the only source of accuracy numbers here, so keep in mind:
+
+- **Contamination.** The public tasks are on GitHub, so a model may have been trained or tuned on
+  them, which would inflate its score. This can't be checked from outside.
+- **Origin.** The question format comes from TypeSafe's Jev, and JevBench was built around it.
+  This may favour Jev and the models closest to it.
+- **One task set.** No second benchmark confirms the ranking.
 
 ## Setup
 
