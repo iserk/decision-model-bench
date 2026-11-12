@@ -82,6 +82,17 @@ JCREW = ("A J.Crew blocker is a provision that typically includes (1) a prohibit
          "borrower from transferring IP to an unrestricted subsidiary, and (2) a requirement that "
          "the borrower obtains the consent of its agent/lenders before transferring IP to any "
          "subsidiary. Does the provision contain a J.Crew blocker?")
+# The same task with the rule's "and" made explicit, for a check of its wording (see the README):
+# the task's description says a blocker only "typically includes" both parts, and its purpose is
+# to keep IP within the lenders' collateral.
+JCREW_CLARIFIED = (
+    "A J.Crew blocker is a provision in a loan agreement that stops the borrower from moving "
+    "intellectual property (IP) out of the lenders' collateral: for example (1) a prohibition on "
+    "transferring IP, or exclusive licences of it, to an unrestricted subsidiary, or on "
+    "designating a subsidiary that holds IP as unrestricted, or (2) a requirement that the "
+    "borrower obtain the consent of its agent/lenders before transferring IP to any subsidiary. "
+    "Either one is enough; it need not contain both. Does the provision contain a J.Crew "
+    "blocker?")
 
 
 def noul(instructions: str) -> dict:
@@ -160,6 +171,17 @@ def fetch_tasks(root: Path) -> tuple[Path, dict[str, str]]:
     joined = data / "tasks.jsonl"
     joined.write_text("".join(json.dumps(t) + "\n" for t in tasks))
     return joined, {t["id"]: t["question"]["type"] for t in tasks}
+
+
+def fetch_jcrew_clarified(root: Path) -> tuple[Path, dict[str, str]]:
+    """The 54 J.Crew blocker cases again, with the rule's wording made explicit."""
+    path, _ = fetch_tasks(root)
+    tasks = [{**t, "id": f"{t['id']}-clarified", "family": "jcrew_blocker_clarified",
+              "question": noul(JCREW_CLARIFIED)}
+             for t in map(json.loads, open(path)) if t["family"] == "jcrew_blocker"]
+    out = path.with_name("jcrew-clarified.jsonl")
+    out.write_text("".join(json.dumps(t) + "\n" for t in tasks))
+    return out, {t["id"]: "noul" for t in tasks}
 
 
 if __name__ == "__main__":  # print the set's make-up

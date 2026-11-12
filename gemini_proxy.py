@@ -13,7 +13,9 @@ API (packages/google/src/google-decision-model.ts, added 11 November 2026):
   for a refused request, `prompt_feedback.block_reason`.
 
 Each response's `latency_ms` is the time spent waiting for Google, so the benchmarks can show the
-translator's own overhead. The key is read from GEMINI_API_KEY only, and never logged.
+translator's own overhead. A 5xx or dropped connection is retried up to three times (after 1, 2
+and 4 s), so a passing outage isn't scored as a wrong answer. The key is read from
+GEMINI_API_KEY only, and never logged.
 
     GEMINI_API_KEY=... uv run gemini_proxy.py --port 8765
 """
@@ -32,6 +34,8 @@ import httpx
 KEY_ENV = "GEMINI_API_KEY"
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 MODEL = "gemini-decision-1"
+RETRY_STATUSES = {500, 502, 503, 504}
+RETRY_DELAYS_S = (1, 2, 4)
 
 
 def to_text(value) -> str:
@@ -112,10 +116,23 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(422, {"error": str(exc)})
             return
         t0 = time.perf_counter()
-        try:
-            r = self.client.post("/decisions", json=request)
-        except httpx.HTTPError as exc:
-            self.reply(502, {"error": f"upstream: {type(exc).__name__}"})
+        for attempt in range(1 + len(RETRY_DELAYS_S)):
+            # A passing outage at Google (5xx or a dropped connection) is retried, so that it
+            # isn't scored as a wrong answer. The time waited counts towards upstream_ms.
+            try:
+                r = self.client.post("/decisions", json=request)
+                if r.status_code not in RETRY_STATUSES:
+                    break
+                problem = f"HTTP {r.status_code}"
+            except httpx.HTTPError as exc:
+                r, problem = None, type(exc).__name__
+            if attempt == len(RETRY_DELAYS_S):
+                break
+            self.log_message("upstream %s, retrying (%d of %d)", problem, attempt + 1,
+                             len(RETRY_DELAYS_S))
+            time.sleep(RETRY_DELAYS_S[attempt])
+        if r is None:
+            self.reply(502, {"error": f"upstream: {problem}"})
             return
         upstream_ms = (time.perf_counter() - t0) * 1000
         if r.status_code != 200:

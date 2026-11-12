@@ -161,7 +161,7 @@ uv run jevbench_eval.py --suite legalbench    # the second set: 915 LegalBench c
 
 TYPESAFE_API_KEY=... uv run jev_latency.py    # where Jev's response time goes
 
-GEMINI_API_KEY=... uv run bench.py --targets gemini:api --remote-concurrency 1 4
+GEMINI_API_KEY=... uv run bench.py --targets gemini:api --remote-concurrency 1 4 8
 GEMINI_API_KEY=... uv run jevbench_eval.py --targets gemini:api
 ```
 
@@ -191,13 +191,11 @@ The home directory is replaced with `~` in results and server logs.
 
 ## Example results
 
-Measured on 11–12 November 2026 on a Mac mini: Apple M5 Pro, 24 GB, macOS 27.2. Software:
+Measured on 11–13 November 2026 on a Mac mini: Apple M5 Pro, 24 GB, macOS 27.2. Software:
 torch 2.15.0 and mlx 0.32.4, strands-decider at `846b69e`, decider-ai 1.10.0, and Open-Jev
-at `bd41188`. Jev was called from the same machine, over a network round trip of about
-140 ms during the JevBench run and 155 ms during the speed runs. Gemini Decision 1
-(`gemini-decision-1`, a day after its release) was called from the same machine on 12 November,
-over a round trip of about 117 ms. These are examples from one machine: rerun them on yours
-before quoting them.
+at `bd41188`. Jev (`jev-1.14.0`) and Gemini Decision 1 (`gemini-decision-1`, released
+11 November) were called from the same machine; each section gives the network round trip at
+the time. These are examples from one machine: rerun them on yours before quoting them.
 
 ### Accuracy: JevBench public set (231 tasks)
 
@@ -211,7 +209,8 @@ before quoting them.
 | Open-Jev-2B, MPS | 151 | 65.4% (59.0–71.2) | 100% | 77.8% | 42.3% | 0.475 | 0.129 | 602 / 8,684 |
 
 Brier and ECE: lower is better. Latency is per task, one request at a time, on states of up to
-~3,700 tokens.
+~3,700 tokens. The hosted models' includes a network round trip of about 140 ms to TypeSafe and
+117 ms to Google at the time.
 
 Paired on the same tasks, the systems fall into three groups:
 
@@ -229,20 +228,23 @@ public-split score in Google's launch announcement.
 Cost of the 231 tasks, from the tokens each API reported:
 
 - **Gemini:** 158,532 input tokens at $0.10 per million, $0.016.
-- **Jev:** 211,309 input tokens at $0.042 per million, $0.009. That price is from OpenRouter's
-  listing, not TypeSafe's own price list.
+- **Jev:** 211,309 input tokens at $0.042 per million, $0.009.
+
+Both prices are the providers' own list prices: Google's paid tier, and TypeSafe's
+[models page](https://docs.typesafe.ai/models).
 
 Output is free on both. The two count tokens differently, so compare the costs, not the counts.
 
 ### Accuracy: LegalBench (915 cases)
 
-Run on 12 November 2026, same machine. Jev was rerun on its own a few minutes later (see the
-harness note below), and the two runs were merged with `--report`.
+Run on 12–13 November 2026, same machine, in three parts merged with `--report`: the local
+models on 12 November, Jev a few minutes later (see the harness note below), and Gemini again
+on 13 November, after the translator learned to retry Google's 5xx errors.
 
 | system | correct | accuracy (95% CI) | noul | choice | score | Brier | ECE | p50 / p95 ms |
 |---|---|---|---|---|---|---|---|---|
 | Jev (hosted, `jev-1.14.0`) | 733 | 80.1% (77.4–82.6) | 84.0% | 70.9% | 77.9% | 0.280 | 0.020 | 228 / 415 |
-| Gemini Decision 1 (hosted) | 717 | 78.4% (75.6–80.9) | 77.1% | 78.9% | 85.3% | 0.274 | 0.059 | 410 / 549 |
+| Gemini Decision 1 (hosted) | 718 | 78.5% (75.7–81.0) | 77.2% | 78.9% | 85.3% | 0.274 | 0.059 | 286 / 408 |
 | strands-decider-2B, MPS | 603 | 65.9% (62.8–68.9) | 73.0% | 64.3% | 25.3% | 0.433 | 0.043 | 110 / 135 |
 | strands-decider-2B, MLX | 601 | 65.7% (62.5–68.7) | 72.5% | 64.3% | 26.3% | 0.433 | 0.047 | 37 / 51 |
 | decider-2b (`v11`), MPS | 529 | 57.8% (54.6–61.0) | 62.4% | 62.1% | 18.9% | 0.688 | 0.287 | 74 / 295 |
@@ -258,7 +260,7 @@ Accuracy per task:
 | diversity_3 | 56.0% | 56.0% | 80.0% | 28.0% | 94.0% | 90.0% |
 | diversity_4 | 76.0% | 76.0% | 64.0% | 48.0% | 94.0% | 74.0% |
 | diversity_5 | 64.0% | 64.0% | 52.0% | 44.0% | 82.0% | 72.0% |
-| diversity_6 | 62.0% | 62.0% | 48.0% | 40.0% | 86.0% | 48.0% |
+| diversity_6 | 62.0% | 62.0% | 48.0% | 40.0% | 86.0% | 50.0% |
 | hearsay | 72.3% | 71.3% | 70.2% | 68.1% | 78.7% | 72.3% |
 | insurance_policy_interpretation | 42.9% | 42.9% | 39.8% | 40.6% | 51.9% | 65.4% |
 | jcrew_blocker | 79.6% | 77.8% | 61.1% | 25.9% | 16.7% | 16.7% |
@@ -269,8 +271,8 @@ Accuracy per task:
 Compared with JevBench:
 
 - **Every system scores lower,** by 9 to 20 points.
-- **The hosted models are still first,** but now Jev is ahead: 89 cases right that Gemini gets
-  wrong, against 73. Not significant (McNemar p = 0.24), so on both sets the two are level.
+- **The hosted models are still first,** but now Jev is ahead: 88 cases right that Gemini gets
+  wrong, against 73. Not significant (McNemar p = 0.27), so on both sets the two are level.
 - **strands-decider pulls ahead of decider-2b.** They were tied on JevBench; here strands gets
   165 cases right that decider-2b gets wrong, against 91 (p < 0.001).
 - **decider-2b and Open-Jev are tied** (181 against 164, p = 0.39). On JevBench Open-Jev was
@@ -285,24 +287,48 @@ Compared with JevBench:
 Notes on this run:
 
 - **J.Crew blockers.** Both hosted models answer "no" to nearly every provision, and most are
-  labelled "yes". The task's rule says a blocker "typically includes (1) … and (2) …", which
-  they read as requiring both parts; most "yes" provisions have only the first. This is
-  ambiguity in the task, not a bug, and it costs the hosted models about 45 cases each.
-- **One Gemini failure.** One case got a 503 "service unavailable" from Google. The harness
-  doesn't retry it and counts the case as wrong.
+  labelled "yes". The task's rule says a blocker "typically includes (1) … and (2) …", and they
+  read it as requiring both parts. A check confirms that the wording is the cause (below).
+- **Gemini's first run had one failure:** a 503 "service unavailable" from Google, which the
+  harness doesn't retry and counts as wrong. The translator now retries 5xx errors up to three
+  times, and Gemini was rerun. The rerun needed no retries and got that case right, which is
+  the only difference between the two runs. Its latency was lower too (p50 286 ms against
+  410 ms), probably because it ran late at night.
 - **Jev's first run stopped at 750 cases.** The harness books a placeholder for each request to
   an API with no known price, and stops at a $15 cap. The script now gives Jev a per-token
-  price (OpenRouter's $0.042 per million), so the harness books its real cost.
+  price (TypeSafe's list price, $0.042 per million), so the harness books its real cost.
 
 Cost of the 915 cases, from the tokens each API reported:
 
-- **Gemini:** 198,288 input tokens at $0.10 per million, $0.020.
+- **Gemini:** 198,570 input tokens at $0.10 per million, $0.020.
 - **Jev:** 383,916 input tokens at $0.042 per million, $0.016.
+
+#### Check: the J.Crew task with explicit wording
+
+`--suite legalbench-jcrew` asks the same 54 J.Crew cases with the rule rewritten to say what
+the task's own description implies: a blocker stops IP from leaving the lenders' collateral, and
+either kind of restriction is enough; it need not contain both. Run on 13 November 2026:
+
+| system | original wording | explicit wording |
+|---|---|---|
+| Jev (hosted) | 16.7% | 98.1% |
+| Gemini Decision 1 (hosted) | 16.7% | 96.3% |
+| strands-decider-2B, MPS | 79.6% | 96.3% |
+| strands-decider-2B, MLX | 77.8% | 96.3% |
+| Open-Jev-2B, MPS | 25.9% | 88.9% |
+| decider-2b, MPS | 61.1% | 83.3% |
+
+So the hosted models' low score was the task's wording, not a weakness in reading loan terms.
+The main table keeps LegalBench's wording, as published. With the explicit wording in its
+place, Jev would have 777 of 915 (84.9%), Gemini 761 (83.2%), strands 612 on MPS (66.9%),
+Open-Jev 546 (59.7%) and decider-2b 541 (59.1%). The order stays the same, except that Open-Jev
+moves just ahead of decider-2b; the two were tied anyway.
 
 ### Speed: `bench.py` (three runs)
 
-Three consecutive runs on 12 November 2026, with the mini's other services paused. Each cell is
-the median of the three runs, with the lowest and highest in brackets where they differ.
+Three consecutive runs with the mini's other services paused: the local models on 12 November
+2026, the hosted models at about 01:20 on 13 November. Each cell is the median of the three
+runs, with the lowest and highest in brackets where they differ.
 
 | system | p50 ms, 1 question | p50 ms, 8 questions on a ~440-token state | req/s, concurrency 1 | req/s, concurrency 4 | req/s, concurrency 8 |
 |---|---|---|---|---|---|
@@ -310,20 +336,29 @@ the median of the three runs, with the lowest and highest in brackets where they
 | strands-decider-2B, MPS | 72 (71–72) | 423 (421–424) | 13.9 (13.9–14.0) | 14.0 (14.0–14.1) | 14.0 (13.9–14.0) |
 | decider-2b, MPS | 46 (46–47) | 2,019 (2,019–2,028) | 18.5 (18.4–18.6) | 27.2 (26.1–29.9) | 31.2 (31.1–31.2) |
 | Open-Jev-2B, MPS | 253 (252–254) | 5,525 (5,523–5,533) | 5.2 (5.1–5.2) | 5.2 | 5.2 |
-| Jev (hosted) | 193 (190–194) | 207 (199–210) | 5.1 (5.0–5.2) | 19.5 (19.5–19.7) | not run |
-| Gemini Decision 1 (hosted) | 233 (230–240) | 249 (248–253) | 4.0 (3.9–4.1) | 15.3 (14.8–15.8) | not run |
+| Jev (hosted) | 208 (207–218) | 223 (219–224) | 4.3 (4.2–4.4) | 19.0 (16.9–19.0) | 34.2 (33.7–35.1) |
+| Gemini Decision 1 (hosted) | 306 (301–306) | 383 (234–404) | 3.5 (3.4–3.6) | 15.0 (14.4–15.6) | 28.8 (27.4–32.5) |
 
-The runs agree to within a few percent, except decider-2b at concurrency 4, which varies by
-about 15%. The hosted models were run at concurrency 1 and 4 only, to stay well inside their
-rate limits. Their latency barely changes with the number of questions, and much of it is
-network time:
+The local models' runs agree to within a few percent, except decider-2b at concurrency 4, which
+varies by about 15%. The hosted models vary more, as a shared service on the internet will.
 
-- **Jev:** about 155 ms of 193 ms is the round trip to TypeSafe, leaving roughly 40 ms past its edge.
-- **Gemini:** about 117 ms of 233 ms is the round trip to Google, leaving roughly 115 ms past
-  its edge. The local translator adds 1–2 ms.
+The hosted models scale almost linearly with concurrency, up to 8: at 8 requests in flight
+their latency is no worse than at 1. Jev reaches 34 req/s and Gemini 29, about as fast as the
+local models at concurrency 8. Neither returned a rate-limit error. Their latency barely changes
+with the number of questions, except Gemini's 8-question requests, which took 234 ms in one run
+and about 390 ms in the other two. Much of their time is the network:
 
-Gemini's speed runs were made later the same night, without pausing the mini's other services.
-Those barely affect a hosted model, whose time is spent on the network and on Google's servers.
+- **Jev:** the round trip to TypeSafe's edge was about 193 ms (p50), most of its 208 ms.
+- **Gemini:** the round trip to Google was about 99 ms of its 306 ms, leaving roughly 200 ms
+  past Google's edge. The local translator adds about 2 ms.
+
+Earlier runs on 12 November gave lower latency for Gemini (p50 233 ms, 1 question) and slightly
+lower for Jev (193 ms), so expect hosted latency to change by the hour.
+
+In two of the three runs, one of Gemini's 50 requests at concurrency 8 failed. The translator
+logged no error from Google, so the request failed between the benchmark and the local
+translator; the benchmark doesn't record the cause. The req/s figures count only the requests
+that succeeded.
 
 ## Files
 
@@ -344,3 +379,15 @@ MIT, for the code in this repository. The models and task sets have their own li
 open models are Apache-2.0, JevBench is MIT, and the eight LegalBench tasks are CC BY 4.0
 (Guha et al., "LegalBench: A Collaboratively Built Benchmark for Measuring Legal Reasoning in
 Large Language Models", 2023). The tasks are downloaded at run time, not stored here.
+
+## Disclaimer
+
+This is an independent benchmark. It is not affiliated with, sponsored or endorsed by Google,
+TypeSafe or the authors of the open models. Gemini is a trademark of Google LLC, and Jev of
+TypeSafe; other names belong to their owners and are used only to say what was measured.
+
+- The results apply only to the model versions, settings, machine and dates stated above.
+  Hosted models change without notice, so a rerun may differ.
+- Only aggregate numbers are published. Raw responses from the hosted APIs stay in the local,
+  git-ignored `results/` folder.
+- Nothing in this repository uses a model's output to train or tune a model.

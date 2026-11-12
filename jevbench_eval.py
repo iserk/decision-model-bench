@@ -52,6 +52,9 @@ SUITES = {
     "legalbench": (lambda: legalbench.fetch_tasks(ROOT), legalbench.COLUMNS,
                    f"LegalBench, 8 rule-application tasks ({legalbench.REVISION[:7]})",
                    "states up to ~1,000 tokens"),
+    "legalbench-jcrew": (lambda: legalbench.fetch_jcrew_clarified(ROOT), ["noul"],
+                         "LegalBench jcrew_blocker, rule wording made explicit",
+                         "states up to ~1,000 tokens"),
 }
 
 
@@ -210,7 +213,7 @@ def print_report(results: dict) -> None:
             print(f"  {p['a']:<14} vs {p['b']:<14} {p['only_a']:>3} / {p['only_b']:<3}"
                   f"  p = {p['p_value']:.3f}")
     families = {f for r in runs.values() for f in r.get("by_family", {})}
-    if results.get("suite") == "legalbench" and families:
+    if results.get("suite", "").startswith("legalbench") and families:
         print("\naccuracy per task")
         print(f"{'task':<34}" + "".join(f"{n[:12]:>13}" for n in runs))
         for f in sorted(families):
@@ -263,7 +266,7 @@ def main() -> None:
                "jevbench": {"repo": JEVBENCH_REPO, "commit": JEVBENCH_COMMIT,
                             "tasks": {f: sha for f, (_, sha) in TASK_FILES.items()}},
                "models": {}, "args": vars(args), "runs": {}}
-    if args.suite == "legalbench":
+    if args.suite.startswith("legalbench"):
         results["legalbench"] = {"dataset": legalbench.DATASET, "revision": legalbench.REVISION,
                                  "tasks": legalbench.SHA256}
 
