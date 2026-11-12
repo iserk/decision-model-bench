@@ -39,6 +39,10 @@ else:  # CUDA when an NVIDIA driver is present, else CPU (slow; for checking the
     LOCAL_TARGETS = [f"{s}:{_DEVICE}" for s in ("strands", "decider", "openjev")]
 # Jev runs only as TypeSafe's hosted API: latency includes the network round trip.
 JEV_URL, JEV_MODEL, JEV_KEY_ENV = "https://api.typesafe.ai", "jev-latest", "TYPESAFE_API_KEY"
+# Jev's price per million tokens, from OpenRouter's listing (TypeSafe publishes none). Without
+# it the JevBench harness books a placeholder per task, which hits its $15 cap at ~750 tasks.
+JEV_HARNESS_COST = ["--price-in-per-m", "0.042", "--price-out-per-m", "0",
+                    "--cost-basis", "jev_openrouter_list_price"]
 # Gemini Decision 1 runs as Google's hosted API, behind gemini_proxy.py on localhost.
 GEMINI_URL, GEMINI_KEY_ENV = "https://generativelanguage.googleapis.com", "GEMINI_API_KEY"
 DEFAULT_TARGETS = (LOCAL_TARGETS + (["jev:api"] if os.environ.get(JEV_KEY_ENV) else [])

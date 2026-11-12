@@ -12,7 +12,7 @@ The benchmark has two independent parts, each with its own script. Either can be
 | part | script | task set | measures |
 |---|---|---|---|
 | 1. Speed | `bench.py` | our own: 26 hand-written cases and a multi-question workload | latency, prefix caching, throughput |
-| 2. Accuracy and calibration | `jevbench_eval.py` | [JevBench](https://github.com/fstandhartinger/jevbench)'s 231 public tasks | accuracy, Brier, ECE, paired tests |
+| 2. Accuracy and calibration | `jevbench_eval.py` | [JevBench](https://github.com/fstandhartinger/jevbench)'s 231 public tasks, and 915 [LegalBench](https://hazyresearch.stanford.edu/legalbench) cases | accuracy, Brier, ECE, paired tests |
 
 ### 1. Speed: `bench.py`
 
@@ -40,13 +40,42 @@ own harness (tag v1.4.2.2, the version behind the v1.4.2
 - for each two systems, the tasks only one of them got right, with an exact McNemar p-value.
   The p-value tells you whether a gap between two systems is more than noise.
 
-JevBench is the only source of accuracy numbers here, so keep in mind:
+About JevBench, keep in mind:
 
 - **Contamination.** The public tasks are on GitHub, so a model may have been trained or tuned on
   them, which would inflate its score. This can't be checked from outside.
 - **Origin.** The question format comes from TypeSafe's Jev, and JevBench was built around it.
   This may favour Jev and the models closest to it.
-- **One task set.** No second benchmark confirms the ranking.
+
+#### The second set: LegalBench (`--suite legalbench`)
+
+To check the JevBench ranking against questions nobody here wrote, `legalbench.py` converts eight
+tasks from [LegalBench](https://hazyresearch.stanford.edu/legalbench) (Guha et al., 2023) into
+JevBench's task format, so the same harness scores them. LegalBench was written and labelled by
+lawyers and legal scholars, not for decision models. Each of the eight tasks states a rule and
+asks for its application to a short case:
+
+| task | type | cases | question |
+|---|---|---|---|
+| `hearsay` | noul | 94 | Is the evidence hearsay? |
+| `personal_jurisdiction` | noul | 50 | Does the court have personal jurisdiction? |
+| `diversity_1` to `_6` | noul | 6 × 50 | Is there diversity jurisdiction? (six levels of complexity) |
+| `proa` | noul | 95 | Does the statute create a private right of action? |
+| `jcrew_blocker` | noul | 54 | Does the loan provision contain a J.Crew blocker? |
+| `ucc_v_common_law` | choice, 2 | 94 | Is the contract governed by the UCC or the common law? |
+| `insurance_policy_interpretation` | choice, 3 | 133 | Is the claim covered, not covered, or is it ambiguous? |
+| `abercrombie` | score, 5 | 95 | Where is the trademark on the spectrum of distinctiveness? |
+
+- Every case is asked zero-shot. The rule, from the task's own description, goes in the
+  question's instructions and the case in the state. LegalBench's few-shot examples are not used.
+- The diversity variants have 300 cases each. A fixed 50 of each are kept (chosen by hash), so
+  that they don't outweigh the other tasks.
+- The test files are downloaded from a pinned revision of the Hugging Face copy and checked by
+  hash. All eight tasks are CC BY 4.0.
+
+LegalBench has its own limits. It has been public since 2023, so it may be in the hosted models'
+training data. It covers one domain: legal rule application. And one task's wording is
+ambiguous; see the J.Crew note under the results.
 
 ## Setup
 
@@ -128,6 +157,7 @@ uv run bench.py --concurrency 1 2 4 8 16 --requests 100 --repeats 5
 uv run jevbench_eval.py                       # same default targets
 uv run jevbench_eval.py --targets strands:mlx --limit 20     # a smoke test
 uv run jevbench_eval.py --report results/jevbench-A results/jevbench-B   # merge saved runs
+uv run jevbench_eval.py --suite legalbench    # the second set: 915 LegalBench cases
 
 TYPESAFE_API_KEY=... uv run jev_latency.py    # where Jev's response time goes
 
@@ -135,7 +165,7 @@ GEMINI_API_KEY=... uv run bench.py --targets gemini:api --remote-concurrency 1 4
 GEMINI_API_KEY=... uv run jevbench_eval.py --targets gemini:api
 ```
 
-`bench.py` writes `results/<timestamp>/`. `jevbench_eval.py` writes `results/jevbench-<timestamp>/`,
+`bench.py` writes `results/<timestamp>/`. `jevbench_eval.py` writes `results/<suite>-<timestamp>/`,
 with the harness's per-task records, raw responses and summary for each target. Every
 `results.json` records:
 
@@ -150,7 +180,8 @@ The home directory is replaced with `~` in results and server logs.
 
 1. Rerun on the same hardware, with all targets in one run, so they share the machine's state.
 2. Repeat `bench.py` three times, and report the spread between runs, not a single run.
-3. `jevbench_eval.py` is deterministic for local models; a second run is a consistency check.
+3. `jevbench_eval.py` is deterministic for local models, on either suite; a second run is a
+   consistency check.
 4. Compare `environment` and `models` in your `results.json` with the published one before
    comparing numbers.
 5. Speed varies with chip and memory bandwidth, so compare speeds only on the same hardware.
@@ -203,6 +234,71 @@ Cost of the 231 tasks, from the tokens each API reported:
 
 Output is free on both. The two count tokens differently, so compare the costs, not the counts.
 
+### Accuracy: LegalBench (915 cases)
+
+Run on 12 November 2026, same machine. Jev was rerun on its own a few minutes later (see the
+harness note below), and the two runs were merged with `--report`.
+
+| system | correct | accuracy (95% CI) | noul | choice | score | Brier | ECE | p50 / p95 ms |
+|---|---|---|---|---|---|---|---|---|
+| Jev (hosted, `jev-1.14.0`) | 733 | 80.1% (77.4–82.6) | 84.0% | 70.9% | 77.9% | 0.280 | 0.020 | 228 / 415 |
+| Gemini Decision 1 (hosted) | 717 | 78.4% (75.6–80.9) | 77.1% | 78.9% | 85.3% | 0.274 | 0.059 | 410 / 549 |
+| strands-decider-2B, MPS | 603 | 65.9% (62.8–68.9) | 73.0% | 64.3% | 25.3% | 0.433 | 0.043 | 110 / 135 |
+| strands-decider-2B, MLX | 601 | 65.7% (62.5–68.7) | 72.5% | 64.3% | 26.3% | 0.433 | 0.047 | 37 / 51 |
+| decider-2b (`v11`), MPS | 529 | 57.8% (54.6–61.0) | 62.4% | 62.1% | 18.9% | 0.688 | 0.287 | 74 / 295 |
+| Open-Jev-2B, MPS | 512 | 56.0% (52.7–59.1) | 59.4% | 59.5% | 26.3% | 0.567 | 0.187 | 212 / 785 |
+
+Accuracy per task:
+
+| task | strands MPS | strands MLX | decider-2b | Open-Jev | Jev | Gemini |
+|---|---|---|---|---|---|---|
+| abercrombie | 25.3% | 26.3% | 18.9% | 26.3% | 77.9% | 85.3% |
+| diversity_1 | 96.0% | 96.0% | 46.0% | 80.0% | 100% | 100% |
+| diversity_2 | 76.0% | 74.0% | 46.0% | 76.0% | 100% | 100% |
+| diversity_3 | 56.0% | 56.0% | 80.0% | 28.0% | 94.0% | 90.0% |
+| diversity_4 | 76.0% | 76.0% | 64.0% | 48.0% | 94.0% | 74.0% |
+| diversity_5 | 64.0% | 64.0% | 52.0% | 44.0% | 82.0% | 72.0% |
+| diversity_6 | 62.0% | 62.0% | 48.0% | 40.0% | 86.0% | 48.0% |
+| hearsay | 72.3% | 71.3% | 70.2% | 68.1% | 78.7% | 72.3% |
+| insurance_policy_interpretation | 42.9% | 42.9% | 39.8% | 40.6% | 51.9% | 65.4% |
+| jcrew_blocker | 79.6% | 77.8% | 61.1% | 25.9% | 16.7% | 16.7% |
+| personal_jurisdiction | 48.0% | 48.0% | 56.0% | 72.0% | 86.0% | 94.0% |
+| proa | 87.4% | 87.4% | 78.9% | 84.2% | 98.9% | 95.8% |
+| ucc_v_common_law | 94.7% | 94.7% | 93.6% | 86.2% | 97.9% | 97.9% |
+
+Compared with JevBench:
+
+- **Every system scores lower,** by 9 to 20 points.
+- **The hosted models are still first,** but now Jev is ahead: 89 cases right that Gemini gets
+  wrong, against 73. Not significant (McNemar p = 0.24), so on both sets the two are level.
+- **strands-decider pulls ahead of decider-2b.** They were tied on JevBench; here strands gets
+  165 cases right that decider-2b gets wrong, against 91 (p < 0.001).
+- **decider-2b and Open-Jev are tied** (181 against 164, p = 0.39). On JevBench Open-Jev was
+  clearly last.
+- **The three small models can't do the 5-level score task.** On `abercrombie` they score 19–26%,
+  about chance (20%); the hosted models score 78–85%. The small models never pick either end of
+  the scale: strands, for example, calls "Salt" for sodium chloride descriptive, not generic.
+  The harness takes the most likely level, so this is the model, not the conversion.
+- **Calibration:** Jev's ECE (0.020) is the best on this set; strands' (0.043) is close.
+  decider-2b's (0.287) is the worst: it is often confidently wrong.
+
+Notes on this run:
+
+- **J.Crew blockers.** Both hosted models answer "no" to nearly every provision, and most are
+  labelled "yes". The task's rule says a blocker "typically includes (1) … and (2) …", which
+  they read as requiring both parts; most "yes" provisions have only the first. This is
+  ambiguity in the task, not a bug, and it costs the hosted models about 45 cases each.
+- **One Gemini failure.** One case got a 503 "service unavailable" from Google. The harness
+  doesn't retry it and counts the case as wrong.
+- **Jev's first run stopped at 750 cases.** The harness books a placeholder for each request to
+  an API with no known price, and stops at a $15 cap. The script now gives Jev a per-token
+  price (OpenRouter's $0.042 per million), so the harness books its real cost.
+
+Cost of the 915 cases, from the tokens each API reported:
+
+- **Gemini:** 198,288 input tokens at $0.10 per million, $0.020.
+- **Jev:** 383,916 input tokens at $0.042 per million, $0.016.
+
 ### Speed: `bench.py` (three runs)
 
 Three consecutive runs on 12 November 2026, with the mini's other services paused. Each cell is
@@ -234,6 +330,7 @@ Those barely affect a hosted model, whose time is spent on the network and on Go
 - `bench.py`: server management, the speed benchmark and its report.
 - `jevbench_eval.py`: runs JevBench's harness against each target, and reports accuracy, Brier,
   ECE, latency and paired tests.
+- `legalbench.py`: downloads the eight LegalBench tasks and converts them to JevBench's format.
 - `envinfo.py`: records the machine and package versions, and replaces the home directory with
   `~` in results.
 - `jev_latency.py`: the network breakdown for the hosted Jev API.
@@ -243,5 +340,7 @@ Those barely affect a hosted model, whose time is spent on the network and on Go
 
 ## License
 
-MIT, for the code in this repository. The models and JevBench have their own licenses: the three
-open models are Apache-2.0, and JevBench is MIT.
+MIT, for the code in this repository. The models and task sets have their own licenses: the three
+open models are Apache-2.0, JevBench is MIT, and the eight LegalBench tasks are CC BY 4.0
+(Guha et al., "LegalBench: A Collaboratively Built Benchmark for Measuring Legal Reasoning in
+Large Language Models", 2023). The tasks are downloaded at run time, not stored here.
