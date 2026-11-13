@@ -365,6 +365,29 @@ raised to 128, which the translator now uses. The benchmark now records each fai
 cause. The req/s figures above count only the requests that succeeded, so Gemini's concurrency-8
 figure is at most 2% low.
 
+#### Latency under load, up to 24 requests in flight
+
+To find where the local model stops being faster than the hosted ones, strands-decider-2B on MLX,
+Jev and Gemini were run again at concurrency 12, 16 and 24: three consecutive runs at about 14:11
+on 13 November 2026, on the same quiet machine and the same short cases, with benchmark commit
+`9aae457` (`jev-1.14.0`, `gemini-decision-1`, strands-decider at `216d1cc`). There were no
+errors and no rate-limit (429) responses. The concurrency 1–8 figures come from the runs above.
+Each cell is p50 / p95 in ms, the median of three runs:
+
+| system | c=1 | c=4 | c=8 | c=12 | c=16 | c=24 |
+|---|---|---|---|---|---|---|
+| strands-decider-2B, MLX | 28 / 29 | 105 / 108 | 207 / 213 | 302 / 316 | 402 / 416 | 609 / 617 |
+| Jev (hosted) | 214 / 315 | 198 / 262 | 201 / 278 | 188 / 251 | 186 / 248 | 209 / 283 |
+| Gemini Decision 1 (hosted) | 293 / 392 | 230 / 377 | 222 / 394 | 275 / 429 | 270 / 504 | 279 / 465 |
+
+strands on MLX saturates the GPU at about 39 req/s from concurrency 4 on, so its latency grows
+in proportion to the requests in flight. The hosted models' latency stays flat: at 24 in flight
+Jev served 84 req/s and Gemini 64. By linear interpolation between the measured points, strands'
+p50 matches Jev's at about 8 requests in flight and Gemini's at about 9; its p95 matches Jev's at
+about 10 and Gemini's at about 19. These crossings mix two times of day for the hosted models
+(concurrency 1–8 at 01:20, 12–24 at 14:11), and hosted latency changes by the hour. Gemini's
+first run at concurrency 24 was slower than the other two (p50 390 ms, p95 1,128 ms).
+
 ## Files
 
 - `bench.py`: server management, the speed benchmark and its report.
