@@ -357,8 +357,13 @@ lower for Jev (193 ms), so expect hosted latency to change by the hour.
 
 In two of the three runs, one of Gemini's 50 requests at concurrency 8 failed. The translator
 logged no error from Google, so the request failed between the benchmark and the local
-translator; the benchmark doesn't record the cause. The req/s figures count only the requests
-that succeeded.
+translator. The cause was the translator, not Google: Python's HTTP server accepts at most 5
+waiting connections by default, and on the Mac mini the benchmark's eight new connections could
+exceed that, so one was refused. A test against a stand-in for Google's API reproduced it (7 to
+10 refused connections in 200 requests at concurrency 16 and 32) and none after the limit was
+raised to 128, which the translator now uses. The benchmark now records each failed request's
+cause. The req/s figures above count only the requests that succeeded, so Gemini's concurrency-8
+figure is at most 2% low.
 
 ## Files
 

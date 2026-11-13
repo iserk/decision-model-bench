@@ -20,6 +20,7 @@ import statistics
 import subprocess
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 import httpx
@@ -279,10 +280,9 @@ async def bench_throughput(url: str, concurrency: int, total: int, headers: dict
     """`total` requests (labeled cases, cycled) with at most `concurrency` in flight."""
     sem = asyncio.Semaphore(concurrency)
     lat: list[float] = []
-    errors = 0
+    errors: Counter[str] = Counter()  # failed requests by kind, e.g. "HTTP 502" or "ReadTimeout"
 
     async def one(i: int, client: httpx.AsyncClient) -> None:
-        nonlocal errors
         case = CASES[i % len(CASES)]
         async with sem:
             t0 = time.perf_counter()
@@ -291,15 +291,21 @@ async def bench_throughput(url: str, concurrency: int, total: int, headers: dict
                                       json=body(case["state"], {"q": case["q"]}, model))
                 r.raise_for_status()
                 lat.append((time.perf_counter() - t0) * 1000)
-            except httpx.HTTPError:
-                errors += 1
+            except httpx.HTTPStatusError as exc:
+                errors[f"HTTP {exc.response.status_code}"] += 1
+                print(f"    request {i}: HTTP {exc.response.status_code}: {exc.response.text[:200]}",
+                      flush=True)
+            except httpx.HTTPError as exc:
+                errors[type(exc).__name__] += 1
+                print(f"    request {i}: {type(exc).__name__}: {exc}", flush=True)
 
     limits = httpx.Limits(max_connections=concurrency * 2)
     async with httpx.AsyncClient(base_url=url, timeout=300, limits=limits, headers=headers) as client:
         t0 = time.perf_counter()
         await asyncio.gather(*(one(i, client) for i in range(total)))
         wall = time.perf_counter() - t0
-    return {"concurrency": concurrency, "requests": total, "errors": errors,
+    return {"concurrency": concurrency, "requests": total, "errors": sum(errors.values()),
+            "error_kinds": dict(errors),
             "wall_s": wall, "rps": len(lat) / wall, "latency_ms": summary(lat) if lat else None}
 
 
@@ -354,7 +360,9 @@ def print_report(results: dict) -> None:
             lat = t["latency_ms"] or {}
             print(f"  concurrency {t['concurrency']:>2}: {t['rps']:6.2f} req/s   "
                   f"p50 {lat.get('p50', 0):7.0f} ms   p95 {lat.get('p95', 0):7.0f} ms   "
-                  f"errors {t['errors']}")
+                  f"errors {t['errors']}"
+                  + (f" ({', '.join(f'{k} x{n}' for k, n in t['error_kinds'].items())})"
+                     if t.get("error_kinds") else ""))
     if len(ok_runs) > 1:
         print(f"\n=== comparison  ({len(CASES)} cases)")
         print(f"{'target':<16}{'acc':>6}{'noul':>6}{'choice':>7}{'score':>6}{'Brier':>7}"

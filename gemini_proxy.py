@@ -84,6 +84,13 @@ def from_gemini(resp: dict, model: str, upstream_ms: float) -> dict:
                       "output_tokens": usage.get("total_output_tokens")}}
 
 
+class Server(ThreadingHTTPServer):
+    # The default listen backlog of 5 is too short for 8 clients connecting at once: on macOS the
+    # connections over it are refused, and the benchmark counted them as failed requests.
+    request_queue_size = 128
+    daemon_threads = True
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"  # keep-alive, like the other servers
     client: httpx.Client
@@ -168,7 +175,7 @@ def main() -> None:
     Handler.client = httpx.Client(base_url=args.base_url, timeout=120,
                                   headers={"x-goog-api-key": key},
                                   limits=httpx.Limits(max_connections=64))
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    server = Server(("127.0.0.1", args.port), Handler)
     print(f"serving {args.model} from {args.base_url} on http://127.0.0.1:{args.port}", flush=True)
     server.serve_forever()
 
